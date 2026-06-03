@@ -5,6 +5,7 @@ Images are upscaled directly. Videos are frame-extracted, upscaled, reassembled.
 
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -13,6 +14,21 @@ log = logging.getLogger(__name__)
 
 MODEL_DIR   = os.environ.get("MODEL_DIR", "/models/esrgan")
 ESRGAN_PATH = "/opt/Real-ESRGAN/inference_realesrgan.py"
+
+
+def _run_logged(cmd, cwd=None):
+    """Run a subprocess and log stdout/stderr if it fails."""
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, cwd=cwd)
+    except subprocess.CalledProcessError as exc:
+        stdout = exc.stdout.decode("utf-8", errors="replace") if exc.stdout else ""
+        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+        log.error("Command failed: %s", " ".join(str(c) for c in cmd))
+        if stdout:
+            log.error("STDOUT: %s", stdout)
+        if stderr:
+            log.error("STDERR: %s", stderr)
+        raise
 
 # Model name → weights file
 MODELS = {
@@ -39,24 +55,23 @@ def upscale_media(input_path: str, output_path: str,
 
 
 def _upscale_image(input_path, output_path, model_name, model_path, scale):
-    out_dir = Path(output_path).parent
-    cmd = [
-        "python3", ESRGAN_PATH,
-        "-i", input_path,
-        "-o", str(out_dir),
-        "-n", model_name,
-        "--model_path", model_path,
-        "--outscale", str(scale),
-        "--fp16",                    # half-precision for speed
-    ]
-    subprocess.run(cmd, check=True, capture_output=True, cwd="/opt/Real-ESRGAN")
-
-    # Real-ESRGAN appends model name to filename, rename to expected output
-    stem  = Path(input_path).stem
-    ext   = Path(output_path).suffix or ".png"
-    guess = out_dir / f"{stem}_{model_name}{ext}"
-    if guess.exists() and str(guess) != output_path:
-        guess.rename(output_path)
+    """Upscale a single image using a temp dir to avoid overwriting the input."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_input = os.path.join(tmp_dir, Path(input_path).name)
+        shutil.copy2(input_path, tmp_input)
+        cmd = [
+            "python3", ESRGAN_PATH,
+            "-i", tmp_input,
+            "-o", tmp_dir,
+            "-n", model_name,
+            "--model_path", model_path,
+            "--outscale", str(scale),
+            "--fp32",          # CPU-safe full precision
+            "--suffix", "",    # preserve original filename
+        ]
+        _run_logged(cmd, cwd="/opt/Real-ESRGAN")
+        result = os.path.join(tmp_dir, Path(input_path).name)
+        shutil.move(result, output_path)
     log.info("Image upscale done -> %s", output_path)
 
 
@@ -70,22 +85,22 @@ def _upscale_video(input_path, output_path, model_name, model_path, scale):
 
         # 1. Extract frames
         log.info("Extracting video frames…")
-        subprocess.run(
+        _run_logged(
             ["ffmpeg", "-i", input_path, "-q:v", "1", frames_in],
-            check=True, capture_output=True,
         )
 
         # 2. Upscale frames
         log.info("Upscaling frames with %s…", model_name)
-        subprocess.run([
+        _run_logged([
             "python3", ESRGAN_PATH,
             "-i", frames_dir,
             "-o", up_dir,
             "-n", model_name,
             "--model_path", model_path,
             "--outscale", str(scale),
-            "--fp16",
-        ], check=True, capture_output=True, cwd="/opt/Real-ESRGAN")
+            "--fp32",
+            "--suffix", "",
+        ], cwd="/opt/Real-ESRGAN")
 
         # 3. Get original FPS
         fps_out = subprocess.check_output([
@@ -96,7 +111,7 @@ def _upscale_video(input_path, output_path, model_name, model_path, scale):
 
         # 4. Reassemble with original audio
         log.info("Reassembling upscaled video…")
-        subprocess.run([
+        _run_logged([
             "ffmpeg", "-y",
             "-framerate", fps_out,
             "-i", os.path.join(up_dir, "frame_%06d.png"),
@@ -105,6 +120,6 @@ def _upscale_video(input_path, output_path, model_name, model_path, scale):
             "-c:v", "libx264", "-crf", "18", "-preset", "slow",
             "-c:a", "copy",
             output_path,
-        ], check=True, capture_output=True)
+        ])
 
     log.info("Video upscale done -> %s", output_path)

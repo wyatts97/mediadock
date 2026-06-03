@@ -73,11 +73,16 @@ def _extract_frame(input_path: str, timestamp: float = 0.0) -> bytes:
     except Exception:
         timestamp = 3.0
 
-    subprocess.run(
-        ["ffmpeg", "-ss", str(timestamp), "-i", input_path,
-         "-vframes", "1", "-q:v", "2", "-y", tmp_path],
-        check=True, capture_output=True,
-    )
+    try:
+        subprocess.run(
+            ["ffmpeg", "-ss", str(timestamp), "-i", input_path,
+             "-vframes", "1", "-q:v", "2", "-y", tmp_path],
+            check=True, capture_output=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+        log.error("FFmpeg frame extract failed: %s", stderr)
+        raise
     with open(tmp_path, "rb") as f:
         data = f.read()
     os.unlink(tmp_path)
@@ -107,8 +112,29 @@ def analyze_media(input_path: str) -> dict:
             timeout=120.0,
         )
         resp.raise_for_status()
-        raw = resp.json().get("response", "")
-        plan = json.loads(raw.strip())
+        data = resp.json()
+        raw = data.get("response", "") if isinstance(data, dict) else ""
+
+        if not raw or not isinstance(raw, str):
+            log.warning("Vision returned empty or non-string response: %s", data)
+            return _safe_defaults()
+
+        # Strip markdown code blocks if present
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+
+        try:
+            plan = json.loads(cleaned)
+        except json.JSONDecodeError as exc:
+            log.warning("Vision JSON parse failed (%s). Raw response: %r", exc, raw)
+            return _safe_defaults()
+
         log.info("LLaVA analysis done: ops=%s", plan.get("suggested_operations"))
         return plan
 

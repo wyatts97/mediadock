@@ -14,6 +14,20 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
+def _run_logged(cmd):
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        stdout = exc.stdout.decode("utf-8", errors="replace") if exc.stdout else ""
+        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+        log.error("Command failed: %s", " ".join(str(c) for c in cmd))
+        if stdout:
+            log.error("STDOUT: %s", stdout)
+        if stderr:
+            log.error("STDERR: %s", stderr)
+        raise
+
+
 def color_correct(input_path: str, output_path: str, media_type: str = "image") -> None:
     if media_type == "image":
         _correct_image(input_path, output_path)
@@ -41,11 +55,11 @@ def _correct_image(input_path: str, output_path: str) -> None:
 
 def _correct_video(input_path: str, output_path: str) -> None:
     # eq filter: contrast/brightness/saturation auto-levels
-    subprocess.run([
+    _run_logged([
         "ffmpeg", "-y", "-i", input_path,
         "-vf", "eq=contrast=1.05:brightness=0.02:saturation=1.1",
         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
         "-c:a", "copy",
         output_path,
-    ], check=True, capture_output=True)
+    ])
     log.info("Video color correction done -> %s", output_path)

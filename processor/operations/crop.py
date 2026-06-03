@@ -9,6 +9,20 @@ import re
 log = logging.getLogger(__name__)
 
 
+def _run_logged(cmd):
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        stdout = exc.stdout.decode("utf-8", errors="replace") if exc.stdout else ""
+        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+        log.error("Command failed: %s", " ".join(str(c) for c in cmd))
+        if stdout:
+            log.error("STDOUT: %s", stdout)
+        if stderr:
+            log.error("STDERR: %s", stderr)
+        raise
+
+
 def crop_black_bars(input_path: str, output_path: str, bars: dict) -> None:
     """
     Detect and crop black bars.
@@ -63,5 +77,5 @@ def crop_black_bars(input_path: str, output_path: str, bars: dict) -> None:
         "-c:a", "copy",
         output_path,
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    _run_logged(cmd)
     log.info("Crop done -> %s", output_path)

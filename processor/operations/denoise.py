@@ -12,6 +12,20 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
+def _run_logged(cmd):
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        stdout = exc.stdout.decode("utf-8", errors="replace") if exc.stdout else ""
+        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+        log.error("Command failed: %s", " ".join(str(c) for c in cmd))
+        if stdout:
+            log.error("STDOUT: %s", stdout)
+        if stderr:
+            log.error("STDERR: %s", stderr)
+        raise
+
+
 def denoise_media(input_path: str, output_path: str,
                   media_type: str = "image", settings: dict = None) -> None:
     settings = settings or {}
@@ -57,11 +71,11 @@ def _denoise_video(input_path: str, output_path: str, strength: str) -> None:
     }
     vf = filters.get(strength, filters["medium"])
 
-    subprocess.run([
+    _run_logged([
         "ffmpeg", "-y", "-i", input_path,
         "-vf", vf,
         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
         "-c:a", "copy",
         output_path,
-    ], check=True, capture_output=True)
+    ])
     log.info("Video denoise done -> %s", output_path)
