@@ -32,7 +32,7 @@ RUN git clone https://github.com/xinntao/Real-ESRGAN.git && \
     cd Real-ESRGAN && \
     pip install --no-cache-dir basicsr facexlib gfpgan && \
     pip install --no-cache-dir -r requirements.txt && \
-    python setup.py develop --no_deps
+    pip install -e . --no-deps
 
 # Download ESRGAN weights
 RUN mkdir -p /models/esrgan && \
