@@ -33,23 +33,7 @@ services:
       - OLLAMA_HOST=0.0.0.0:11434
     ports:
       - "11434"           # internal only
-    # ── GPU: uncomment whichever you have ──
-    # NVIDIA:
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    # AMD (ROCm) — swap the above block for:
-    # devices:
-    #   - /dev/kfd
-    #   - /dev/dri
-    # group_add:
-    #   - video
-    # environment:
-    #   - HSA_OVERRIDE_GFX_VERSION=10.3.0   # adjust for your card
+    # GPU passthrough: use docker-compose.gpu.yml
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
       interval: 15s
@@ -72,21 +56,11 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - AI_VISION_URL=http://ai-vision:11434
-      - NVIDIA_VISIBLE_DEVICES=all          # remove for AMD
     depends_on:
       redis:
         condition: service_healthy
       ai-vision:
         condition: service_healthy
-    # NVIDIA:
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    # AMD: same device passthrough as ai-vision above
     shm_size: "2gb"
 
   # ── FastAPI orchestration backend ─────────────────────────
