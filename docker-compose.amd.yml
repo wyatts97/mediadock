@@ -1,0 +1,33 @@
+# docker-compose.amd.yml — AMD ROCm GPU override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
+
+version: "3.9"
+
+services:
+
+  ai-vision:
+    # Remove NVIDIA deploy block, add ROCm devices
+    deploy: {}
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    environment:
+      - OLLAMA_MODELS=/models/ollama
+      - OLLAMA_HOST=0.0.0.0:11434
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0   # ← adjust for your card
+      - ROC_ENABLE_PRE_VEGA=1
+
+  processor:
+    deploy: {}
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - AI_VISION_URL=http://ai-vision:11434
+      - ROCM_VISIBLE_DEVICES=0
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0

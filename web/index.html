@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MEDIA//AI — Processing Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:        #0a0a0a;
+    --panel:     #111111;
+    --border:    #222222;
+    --border2:   #2e2e2e;
+    --accent:    #e8ff47;
+    --accent2:   #47d4ff;
+    --accent3:   #ff6b47;
+    --dim:       #555555;
+    --text:      #d4d4d4;
+    --text-hi:   #f0f0f0;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'Space Grotesk', sans-serif;
+    --radius:    2px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Scanline overlay ─────────────────────────────────── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  /* ── Header ───────────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text-hi);
+  }
+  .logo span { color: var(--accent); }
+  .logo em { font-style: normal; color: var(--dim); }
+
+  .ai-pill {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--dim);
+    border: 1px solid var(--border2);
+    padding: 5px 12px;
+    border-radius: 100px;
+    transition: border-color .2s;
+  }
+  .ai-pill .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--dim);
+    transition: background .3s;
+  }
+  .ai-pill.ready  { color: var(--accent);  border-color: var(--accent);  }
+  .ai-pill.ready .dot  { background: var(--accent);  box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+  .ai-pill.error  { color: var(--accent3); border-color: var(--accent3); }
+  .ai-pill.error .dot  { background: var(--accent3); }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ── Layout ───────────────────────────────────────────── */
+  .workspace {
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 57px);
+  }
+
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 28px 28px;
+    display: flex; flex-direction: column; gap: 28px;
+    overflow-y: auto;
+  }
+
+  .main-panel {
+    padding: 28px 32px;
+    display: flex; flex-direction: column; gap: 24px;
+  }
+
+  /* ── Section labels ───────────────────────────────────── */
+  .section-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── Drop zone ────────────────────────────────────────── */
+  .drop-zone {
+    border: 1px dashed var(--border2);
+    border-radius: var(--radius);
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(232,255,71,.04);
+  }
+  .drop-zone .dz-icon {
+    font-size: 36px;
+    margin-bottom: 12px;
+    display: block;
+    filter: grayscale(1);
+    transition: filter .2s;
+  }
+  .drop-zone:hover .dz-icon { filter: none; }
+  .drop-zone .dz-title {
+    font-size: 13px;
+    color: var(--text-hi);
+    margin-bottom: 4px;
+  }
+  .drop-zone .dz-sub { font-size: 11px; color: var(--dim); }
+  .drop-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer;
+  }
+
+  .file-preview {
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    display: flex; align-items: center; gap: 12px;
+    font-size: 12px;
+    display: none;
+  }
+  .file-preview.show { display: flex; }
+  .file-preview .fp-icon { font-size: 22px; flex-shrink: 0; }
+  .file-preview .fp-name { color: var(--text-hi); word-break: break-all; }
+  .file-preview .fp-size { color: var(--dim); font-size: 11px; }
+
+  /* ── Controls ─────────────────────────────────────────── */
+  .control-group { display: flex; flex-direction: column; gap: 10px; }
+
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    user-select: none;
+    transition: border-color .15s;
+  }
+  .toggle-row:hover { border-color: var(--border2); }
+  .toggle-row.active { border-color: var(--accent); }
+
+  .toggle-label { color: var(--text-hi); font-size: 12px; }
+  .toggle-desc  { color: var(--dim); font-size: 11px; margin-top: 2px; }
+
+  .toggle-switch {
+    width: 36px; height: 20px;
+    border: 1px solid var(--border2);
+    border-radius: 100px;
+    position: relative;
+    transition: background .2s, border-color .2s;
+    flex-shrink: 0;
+  }
+  .toggle-switch::after {
+    content: '';
+    position: absolute;
+    left: 3px; top: 3px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--dim);
+    transition: transform .2s, background .2s;
+  }
+  .toggle-row.active .toggle-switch {
+    background: rgba(232,255,71,.15);
+    border-color: var(--accent);
+  }
+  .toggle-row.active .toggle-switch::after {
+    transform: translateX(16px);
+    background: var(--accent);
+    box-shadow: 0 0 8px rgba(232,255,71,.6);
+  }
+
+  .sub-options {
+    padding: 0 14px 0 14px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: -4px;
+    padding-top: 10px;
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius) var(--radius);
+    background: rgba(17,17,17,.8);
+    padding-bottom: 12px;
+  }
+  .sub-options.show { display: flex; }
+
+  .select-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px;
+  }
+  .select-row label { color: var(--dim); }
+  .select-row select {
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    color: var(--text-hi);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    outline: none;
+  }
+  .select-row select:focus { border-color: var(--accent); }
+
+  /* ── AI auto-analyze banner ───────────────────────────── */
+  .ai-banner {
+    padding: 12px 14px;
+    background: rgba(71,212,255,.06);
+    border: 1px solid rgba(71,212,255,.2);
+    border-radius: var(--radius);
+    font-size: 11px;
+    color: var(--accent2);
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .ai-banner .ai-icon { font-size: 18px; flex-shrink: 0; }
+
+  /* ── Submit button ────────────────────────────────────── */
+  .submit-btn {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    color: #0a0a0a;
+    border: none;
+    border-radius: var(--radius);
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: opacity .15s, transform .1s;
+  }
+  .submit-btn:hover  { opacity: .88; }
+  .submit-btn:active { transform: scale(.98); }
+  .submit-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* ── Jobs panel ───────────────────────────────────────── */
+  .jobs-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--dim);
+    font-size: 12px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+  }
+  .jobs-empty .je-icon { font-size: 48px; margin-bottom: 12px; display: block; }
+
+  .job-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    animation: slideIn .25s ease;
+  }
+  @keyframes slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:none} }
+
+  .job-card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .job-filename { color: var(--text-hi); font-size: 12px; }
+  .job-meta     { color: var(--dim); font-size: 11px; margin-top: 2px; }
+
+  .job-badge {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: 100px;
+    border: 1px solid currentColor;
+  }
+  .badge-queued   { color: var(--dim); }
+  .badge-running  { color: var(--accent2); animation: pulse 1.5s infinite; }
+  .badge-done     { color: var(--accent); }
+  .badge-error    { color: var(--accent3); }
+
+  .job-card-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+
+  .progress-track {
+    height: 3px;
+    background: var(--border);
+    border-radius: 100px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 100px;
+    transition: width .4s ease;
+    box-shadow: 0 0 8px var(--accent);
+  }
+  .progress-fill.error { background: var(--accent3); box-shadow: none; }
+
+  .job-status-text { font-size: 11px; color: var(--dim); }
+
+  .ops-list {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-top: 4px;
+  }
+  .op-chip {
+    font-size: 10px;
+    padding: 2px 8px;
+    background: rgba(232,255,71,.08);
+    border: 1px solid rgba(232,255,71,.2);
+    color: var(--accent);
+    border-radius: 100px;
+  }
+  .op-chip.stub {
+    background: rgba(255,107,71,.06);
+    border-color: rgba(255,107,71,.2);
+    color: var(--accent3);
+  }
+
+  .download-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    border-radius: var(--radius);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background .15s;
+  }
+  .download-btn:hover { background: rgba(232,255,71,.08); }
+
+  /* ── Stats bar ────────────────────────────────────────── */
+  .stats-bar {
+    display: flex; gap: 24px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--dim);
+  }
+  .stat-item span { color: var(--text-hi); font-weight: 600; }
+
+  /* ── Stub warning ─────────────────────────────────────── */
+  .stub-notice {
+    padding: 10px 14px;
+    background: rgba(255,107,71,.06);
+    border: 1px solid rgba(255,107,71,.2);
+    border-radius: var(--radius);
+    font-size: 11px;
+    color: var(--accent3);
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ── Scrollbar ────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">MEDIA<span>//</span>AI <em>v1.0</em></div>
+  <div class="ai-pill" id="aiPill">
+    <div class="dot"></div>
+    <span id="aiStatus">checking AI…</span>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- ── Sidebar: upload + options ─────────────────────── -->
+  <aside class="sidebar">
+
+    <div>
+      <div class="section-label">Input</div>
+      <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept="image/*,video/*" />
+        <span class="dz-icon">📂</span>
+        <div class="dz-title">Drop file here or click to browse</div>
+        <div class="dz-sub">Images: JPG PNG WEBP BMP TIFF · Video: MP4 MKV AVI MOV</div>
+      </div>
+      <div class="file-preview" id="filePreview">
+        <span class="fp-icon" id="fpIcon">🖼</span>
+        <div>
+          <div class="fp-name" id="fpName">—</div>
+          <div class="fp-size" id="fpSize">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">AI Analysis</div>
+      <div class="ai-banner">
+        <span class="ai-icon">🤖</span>
+        <div>
+          <strong>Auto-detect enabled.</strong> LLaVA will analyze your file
+          and automatically select the right operations. Override below.
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Operations</div>
+      <div class="control-group">
+
+        <!-- Upscale -->
+        <div class="toggle-row" id="tog-upscale" onclick="toggle('upscale')">
+          <div>
+            <div class="toggle-label">⬆ Upscale</div>
+            <div class="toggle-desc">AI super-resolution via Real-ESRGAN</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+        <div class="sub-options" id="sub-upscale">
+          <div class="select-row">
+            <label>Scale factor</label>
+            <select id="sel-upscale">
+              <option value="2x">2×</option>
+              <option value="4x">4×</option>
+            </select>
+          </div>
+          <div class="select-row">
+            <label>Model</label>
+            <select id="sel-model">
+              <option value="auto">Auto</option>
+              <option value="2x">x2plus (fast)</option>
+              <option value="4x">x4plus (detail)</option>
+              <option value="4x_anime">x4 Anime</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Denoise -->
+        <div class="toggle-row" id="tog-denoise" onclick="toggle('denoise')">
+          <div>
+            <div class="toggle-label">✨ Denoise</div>
+            <div class="toggle-desc">Remove grain and compression noise</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+        <div class="sub-options" id="sub-denoise">
+          <div class="select-row">
+            <label>Strength</label>
+            <select id="sel-denoise">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Crop -->
+        <div class="toggle-row" id="tog-crop" onclick="toggle('crop')">
+          <div>
+            <div class="toggle-label">✂ Remove Black Bars</div>
+            <div class="toggle-desc">Auto-detect and crop letterbox / pillarbox</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+
+        <!-- Color -->
+        <div class="toggle-row" id="tog-color" onclick="toggle('color')">
+          <div>
+            <div class="toggle-label">🎨 Color Correction</div>
+            <div class="toggle-desc">CLAHE levels + white-balance fix</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+
+        <!-- Watermark stub -->
+        <div class="toggle-row" id="tog-wm" onclick="toggle('wm')" style="opacity:.55">
+          <div>
+            <div class="toggle-label">🚧 Watermark Removal</div>
+            <div class="toggle-desc">Stub — not yet implemented</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <div>
+      <div class="stub-notice">
+        <span>⚠</span>
+        Watermark removal is a stub (pass-through). File processes normally; the operation is logged but skipped.
+      </div>
+    </div>
+
+    <button class="submit-btn" id="submitBtn" disabled onclick="submitJob()">
+      PROCESS FILE
+    </button>
+
+  </aside>
+
+  <!-- ── Main: jobs queue ───────────────────────────────── -->
+  <main class="main-panel">
+
+    <div class="stats-bar">
+      <div class="stat-item">Jobs: <span id="statTotal">0</span></div>
+      <div class="stat-item">Running: <span id="statRunning">0</span></div>
+      <div class="stat-item">Done: <span id="statDone">0</span></div>
+    </div>
+
+    <div>
+      <div class="section-label">Processing Queue</div>
+      <div id="jobsEmpty" class="jobs-empty">
+        <span class="je-icon">📭</span>
+        No jobs yet — drop a file and hit Process
+      </div>
+      <div id="jobsList" style="display:flex;flex-direction:column;gap:12px;"></div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+const API = '/api';
+const jobs = {};   // taskId → {filename, state, ...}
+
+// ── AI status ping ─────────────────────────────────────────
+async function checkAI() {
+  const pill = document.getElementById('aiPill');
+  const txt  = document.getElementById('aiStatus');
+  try {
+    const r = await fetch(`${API}/ai-status`);
+    const d = await r.json();
+    if (d.ready) {
+      pill.className = 'ai-pill ready';
+      txt.textContent = `LLaVA ready · ${d.models?.[0] ?? 'model loaded'}`;
+    } else {
+      pill.className = 'ai-pill error';
+      txt.textContent = 'AI loading… (may take a few min on first boot)';
+      setTimeout(checkAI, 8000);
+    }
+  } catch {
+    pill.className = 'ai-pill error';
+    txt.textContent = 'AI unreachable';
+    setTimeout(checkAI, 8000);
+  }
+}
+checkAI();
+
+// ── File input ─────────────────────────────────────────────
+const dropZone  = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+let selectedFile = null;
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+
+function setFile(f) {
+  selectedFile = f;
+  const isVid = f.type.startsWith('video/');
+  document.getElementById('fpIcon').textContent = isVid ? '🎬' : '🖼';
+  document.getElementById('fpName').textContent = f.name;
+  document.getElementById('fpSize').textContent = formatBytes(f.size);
+  document.getElementById('filePreview').classList.add('show');
+  document.getElementById('submitBtn').disabled = false;
+}
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+  return (b/1073741824).toFixed(2) + ' GB';
+}
+
+// ── Toggle controls ────────────────────────────────────────
+const states = { upscale: false, denoise: false, crop: false, color: false, wm: false };
+
+function toggle(key) {
+  states[key] = !states[key];
+  const row = document.getElementById(`tog-${key}`);
+  row.classList.toggle('active', states[key]);
+  const sub = document.getElementById(`sub-${key}`);
+  if (sub) sub.classList.toggle('show', states[key]);
+}
+
+// ── Submit ─────────────────────────────────────────────────
+async function submitJob() {
+  if (!selectedFile) return;
+  document.getElementById('submitBtn').disabled = true;
+
+  const fd = new FormData();
+  fd.append('file', selectedFile);
+  fd.append('auto_analyze',    'true');
+  fd.append('force_upscale',   states.upscale  ? 'true' : 'false');
+  fd.append('upscale_factor',  document.getElementById('sel-upscale')?.value || '2x');
+  fd.append('esrgan_model',    document.getElementById('sel-model')?.value   || 'auto');
+  fd.append('force_denoise',   states.denoise  ? 'true' : 'false');
+  fd.append('denoise_strength',document.getElementById('sel-denoise')?.value || 'medium');
+  fd.append('force_crop',      states.crop     ? 'true' : 'false');
+  fd.append('force_color',     states.color    ? 'true' : 'false');
+  fd.append('watermark_stub',  states.wm       ? 'true' : 'false');
+
+  try {
+    const r = await fetch(`${API}/jobs`, { method: 'POST', body: fd });
+    const d = await r.json();
+    addJob(d.task_id, selectedFile.name, d.media_type);
+    // Reset file
+    selectedFile = null;
+    document.getElementById('filePreview').classList.remove('show');
+    fileInput.value = '';
+    document.getElementById('submitBtn').disabled = false;
+  } catch (e) {
+    alert('Submission failed: ' + e.message);
+    document.getElementById('submitBtn').disabled = false;
+  }
+}
+
+// ── Job tracking ───────────────────────────────────────────
+function addJob(taskId, filename, mediaType) {
+  jobs[taskId] = { filename, mediaType, state: 'queued', progress: 0 };
+  renderJob(taskId);
+  updateStats();
+  pollJob(taskId);
+}
+
+async function pollJob(taskId) {
+  try {
+    const r = await fetch(`${API}/jobs/${taskId}/status`);
+    const d = await r.json();
+    jobs[taskId] = { ...jobs[taskId], ...d };
+    renderJob(taskId);
+    updateStats();
+    if (!['done','error'].includes(d.state)) {
+      setTimeout(() => pollJob(taskId), 1500);
+    }
+  } catch {
+    setTimeout(() => pollJob(taskId), 3000);
+  }
+}
+
+function renderJob(taskId) {
+  const job  = jobs[taskId];
+  const list = document.getElementById('jobsList');
+  const empty= document.getElementById('jobsEmpty');
+  empty.style.display = 'none';
+
+  let card = document.getElementById(`job-${taskId}`);
+  if (!card) {
+    card = document.createElement('div');
+    card.className = 'job-card';
+    card.id = `job-${taskId}`;
+    list.prepend(card);
+  }
+
+  const badgeClass = { queued:'badge-queued', started:'badge-queued',
+                        running:'badge-running', done:'badge-done', error:'badge-error' }[job.state] || 'badge-queued';
+  const badgeText  = { queued:'queued', started:'starting',
+                        running:'processing', done:'done', error:'error' }[job.state] || job.state;
+
+  const fillClass = job.state === 'error' ? 'progress-fill error' : 'progress-fill';
+
+  const opsHtml = (job.operations_run || []).map(op => {
+    const isStub = op.includes('stub') || op.includes('watermark');
+    return `<span class="op-chip ${isStub ? 'stub' : ''}">${op.replace(/_/g,' ')}</span>`;
+  }).join('');
+
+  const dlHtml = job.state === 'done'
+    ? `<a class="download-btn" href="${API}/jobs/${taskId}/download" download>⬇ Download Result</a>`
+    : '';
+
+  card.innerHTML = `
+    <div class="job-card-header">
+      <div>
+        <div class="job-filename">${job.filename}</div>
+        <div class="job-meta">${job.mediaType || ''} · ${taskId.slice(0,8)}…</div>
+      </div>
+      <span class="job-badge ${badgeClass}">${badgeText}</span>
+    </div>
+    <div class="job-card-body">
+      <div class="progress-track">
+        <div class="${fillClass}" style="width:${job.progress || 0}%"></div>
+      </div>
+      <div class="job-status-text">${job.status || '…'}</div>
+      ${opsHtml ? `<div class="ops-list">${opsHtml}</div>` : ''}
+      ${dlHtml}
+    </div>
+  `;
+}
+
+function updateStats() {
+  const all     = Object.values(jobs);
+  const running = all.filter(j => j.state === 'running' || j.state === 'started').length;
+  const done    = all.filter(j => j.state === 'done').length;
+  document.getElementById('statTotal').textContent   = all.length;
+  document.getElementById('statRunning').textContent = running;
+  document.getElementById('statDone').textContent    = done;
+}
+</script>
+</body>
+</html>

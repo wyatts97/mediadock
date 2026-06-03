@@ -1,0 +1,137 @@
+version: "3.9"
+
+# ============================================================
+#  media-ai  —  AI-powered media processing stack
+#  External port: 4953  →  Internal web port: 7841
+# ============================================================
+
+services:
+
+  # ── Redis job queue ────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [medianet]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── LLaVA vision analysis service ─────────────────────────
+  ai-vision:
+    build:
+      context: ./ai-vision
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks: [medianet]
+    volumes:
+      - ./models:/models
+      - frame_cache:/tmp/frames
+    environment:
+      - OLLAMA_MODELS=/models/ollama
+      - OLLAMA_HOST=0.0.0.0:11434
+    ports:
+      - "11434"           # internal only
+    # ── GPU: uncomment whichever you have ──
+    # NVIDIA:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # AMD (ROCm) — swap the above block for:
+    # devices:
+    #   - /dev/kfd
+    #   - /dev/dri
+    # group_add:
+    #   - video
+    # environment:
+    #   - HSA_OVERRIDE_GFX_VERSION=10.3.0   # adjust for your card
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+  # ── Processing worker (FFmpeg + ESRGAN + BasicVSR) ─────────
+  processor:
+    build:
+      context: ./processor
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks: [medianet]
+    volumes:
+      - ./models:/models:ro
+      - input_vol:/data/input
+      - output_vol:/data/output
+      - frame_cache:/tmp/frames
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - AI_VISION_URL=http://ai-vision:11434
+      - NVIDIA_VISIBLE_DEVICES=all          # remove for AMD
+    depends_on:
+      redis:
+        condition: service_healthy
+      ai-vision:
+        condition: service_healthy
+    # NVIDIA:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # AMD: same device passthrough as ai-vision above
+    shm_size: "2gb"
+
+  # ── FastAPI orchestration backend ─────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks: [medianet]
+    volumes:
+      - input_vol:/data/input
+      - output_vol:/data/output
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - AI_VISION_URL=http://ai-vision:11434
+      - INPUT_DIR=/data/input
+      - OUTPUT_DIR=/data/output
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8317"            # internal only
+
+  # ── Web UI (Nginx + static build) ─────────────────────────
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks: [medianet]
+    environment:
+      - API_URL=http://api:8317
+    depends_on:
+      - api
+    ports:
+      - "4953:7841"       # ← the single outward-facing port
+
+volumes:
+  redis_data:
+  input_vol:
+  output_vol:
+  frame_cache:
+
+networks:
+  medianet:
+    driver: bridge
