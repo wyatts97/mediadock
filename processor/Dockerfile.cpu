@@ -1,32 +1,26 @@
-# ── Media Processor ───────────────────────────────────────────
-# FFmpeg (NVENC/VAAPI) + Real-ESRGAN + BasicVSR++ + OpenCV
-# NVIDIA base — for AMD replace with rocm/pytorch base and set ROCm env vars.
+# ── Media Processor (CPU-only) ──────────────────────────────
+# FFmpeg + Real-ESRGAN + OpenCV — no CUDA required
 
-FROM nvidia/cuda:12.3.2-cudnn9-runtime-ubuntu22.04
+FROM python:3.11-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
 # ── System packages ───────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # FFmpeg with NVENC/NVDEC support
     ffmpeg \
-    # Python
-    python3.11 python3.11-dev python3-pip \
-    # OpenCV deps
     libglib2.0-0 libsm6 libxrender1 libxext6 libgl1 \
-    # Misc
     wget curl git unzip \
     && rm -rf /var/lib/apt/lists/*
 
-RUN ln -sf /usr/bin/python3.11 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3 /usr/bin/python
-
-# ── Python deps ───────────────────────────────────────────────
+# ── Python deps (CPU-only PyTorch) ──────────────────────────
 COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir \
+    torch==2.2.0 torchvision==0.17.0 \
+    --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# ── Real-ESRGAN ───────────────────────────────────────────────
+# ── Real-ESRGAN ─────────────────────────────────────────────
 WORKDIR /opt
 RUN git clone https://github.com/xinntao/Real-ESRGAN.git && \
     cd Real-ESRGAN && \
@@ -43,7 +37,7 @@ RUN mkdir -p /models/esrgan && \
     wget -q -O /models/esrgan/RealESRGAN_x4plus_anime_6B.pth \
         https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth
 
-# ── App code ─────────────────────────────────────────────────
+# ── App code ────────────────────────────────────────────────
 WORKDIR /app
 COPY worker.py        /app/worker.py
 COPY operations/      /app/operations/

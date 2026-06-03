@@ -1,13 +1,13 @@
 # docker-compose.cpu.yml — CPU-only override (no GPU)
 # Usage: docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
 
-version: "3.9"
-
 services:
   ai-vision:
     deploy: {}     # removes NVIDIA GPU reservation
 
   processor:
+    build:
+      dockerfile: Dockerfile.cpu
     deploy: {}
     environment:
       - REDIS_URL=redis://redis:6379/0
